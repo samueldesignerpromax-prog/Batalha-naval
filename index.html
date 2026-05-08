@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>BATTLESHIP - Guerra Naval</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a1628 0%, #0a2a3a 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', monospace;
+        }
+
+        .game-container {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 20px;
+            padding: 20px;
+            border: 2px solid #2a6f8f;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            cursor: crosshair;
+        }
+
+        .info-panel {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            border: 1px solid #2a6f8f;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #6aa9bb;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ffcc44;
+        }
+
+        .health-bar {
+            width: 150px;
+            height: 10px;
+            background: #330000;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #44ff44, #ffcc44);
+            transition: width 0.2s;
+        }
+
+        button {
+            background: linear-gradient(135deg, #2a6f8f, #1a4a6f);
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            font-family: monospace;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 10px;
+        }
+
+        .controls span {
+            color: #ffcc44;
+            font-weight: bold;
+        }
+
+        .game-over {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 1000;
+            border: 2px solid #ffcc44;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <canvas id="gameCanvas" width="900" height="600"></canvas>
+        
+        <div class="info-panel">
+            <div class="stat">
+                <div class="stat-label">🚢 SEU NAVIO</div>
+                <div class="health-bar">
+                    <div class="health-fill" id="playerHealth" style="width: 100%"></div>
+                </div>
+                <div class="stat-value" id="playerHp">100%</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">💥 DANO</div>
+                <div class="stat-value" id="damage">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">🎯 ACERTOS</div>
+                <div class="stat-value" id="hits">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">🚢 INIMIGOS</div>
+                <div class="stat-value" id="enemiesLeft">3</div>
+            </div>
+            <button onclick="restartGame()">🔄 REINICIAR</button>
+        </div>
+
+        <div class="controls" style="margin-top: 15px; justify-content: center;">
+            <span>⬆️ W/↑</span>
+            <span>⬇️ S/↓</span>
+            <span>⬅️ A/←</span>
+            <span>➡️ D/→</span>
+            <span>🔫 ESPAÇO/CLIQUE</span>
+        </div>
+    </div>
+
+    <div id="gameOver" class="game-over hidden">
+        <h1 id="gameOverTitle">🏆 VITÓRIA! 🏆</h1>
+        <p id="gameOverText">Você destruiu todos os navios!</p>
+        <button onclick="restartGame()">JOGAR NOVAMENTE</button>
+    </div>
+
+    <script>
+        // Configuração do canvas
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Tamanho fixo do canvas
+        canvas.width = 900;
+        canvas.height = 600;
+        
+        // Teclas pressionadas
+        const keys = {
+            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+            w: false, s: false, a: false, d: false,
+            space: false
+        };
+        
+        // ============================================
+        // CLASSE DO NAVIO
+        // ============================================
+        class Ship {
+            constructor(x, y, type, isEnemy = false) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.isEnemy = isEnemy;
+                this.hp = type === 'couracado' ? 100 : type === 'cruzador' ? 70 : 50;
+                this.maxHp = this.hp;
+                this.size = type === 'couracado' ? 35 : type === 'cruzador' ? 30 : 25;
+                this.damage = type === 'couracado' ? 20 : type === 'cruzador' ? 15 : 10;
+                this.speed = isEnemy ? 60 : 200;
+                this.shootCooldown = 0;
+                this.angle = 0;
+                
+                // Para movimento dos inimigos
+                this.moveDirection = { x: (Math.random() - 0.5) * 100, y: (Math.random() - 0.5) * 100 };
+            }
+            
+            update(deltaTime, playerX, playerY, mouseX, mouseY) {
+                if (!this.isEnemy) {
+                    // Movimento do jogador com teclado
+                    let moveX = 0, moveY = 0;
+                    if (keys.w || keys.ArrowUp) moveY -= 1;
+                    if (keys.s || keys.ArrowDown) moveY += 1;
+                    if (keys.a || keys.ArrowLeft) moveX -= 1;
+                    if (keys.d || keys.ArrowRight) moveX += 1;
+                    
+                    if (moveX !== 0 || moveY !== 0) {
+                        const len = Math.hypot(moveX, moveY);
+                        moveX /= len;
+                        moveY /= len;
+                        this.angle = Math.atan2(moveY, moveX);
+                    }
+                    
+                    this.x += moveX * this.speed * deltaTime;
+                    this.y += moveY * this.speed * deltaTime;
+                    
+                    // Limites
+                    this.x = Math.min(Math.max(this.x, 40), canvas.width - 40);
+                    this.y = Math.min(Math.max(this.y, 50), canvas.height - 50);
+                } else {
+                    // Movimento dos inimigos (patrulha)
+                    this.x += this.moveDirection.x * deltaTime;
+                    this.y += this.moveDirection.y * deltaTime;
+                    
+                    if (this.x < 30 || this.x > canvas.width - 30) this.moveDirection.x *= -1;
+                    if (this.y < 50 || this.y > canvas.height - 100) this.moveDirection.y *= -1;
+                    
+                    // Ângulo aponta para o jogador
+                    this.angle = Math.atan2(playerY - this.y, playerX - this.x);
+                }
+                
+                // Cooldown do tiro
+                if (this.shootCooldown > 0) {
+                    this.shootCooldown -= deltaTime;
+                }
+            }
+            
+            shoot() {
+                if (this.shootCooldown > 0) return null;
+                this.shootCooldown = 0.8;
+                
+                // Ângulo do tiro (para o mouse no jogador, para o jogador nos inimigos)
+                let angle;
+                if (!this.isEnemy) {
+                    angle = Math.atan2(mouseY - this.y, mouseX - this.x);
+                } else {
+                    angle = Math.atan2(playerY - this.y, playerX - this.x);
+                }
+                
+                return {
+                    x: this.x + Math.cos(angle) * this.size,
+                    y: this.y + Math.sin(angle) * this.size,
+                    vx: Math.cos(angle) * 400,
+                    vy: Math.sin(angle) * 400,
+                    damage: this.damage,
+                    isEnemy: this.isEnemy
+                };
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                
+                // Casco
+                ctx.fillStyle = this.isEnemy ? '#8B4513' : '#2E8B57';
+                ctx.shadowBlur = 5;
+                ctx.beginPath();
+                ctx.ellipse(0, 0, this.size, this.size * 0.6, 0, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Deck
+                ctx.fillStyle = this.isEnemy ? '#A0522D' : '#3CB371';
+                ctx.beginPath();
+                ctx.ellipse(0, -5, this.size * 0.7, this.size * 0.35, 0, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Canhão
+                ctx.fillStyle = '#666';
+                ctx.fillRect(this.size * 0.4, -5, 15, 8);
+                ctx.fillStyle = '#888';
+                ctx.fillRect(this.size * 0.5 + 5, -4, 18, 6);
+                
+                // Mastro
+                ctx.fillStyle = '#8B6914';
+                ctx.fillRect(-3, -this.size * 0.7, 6, this.size * 0.7);
+                
+                // Vela
+                ctx.fillStyle = '#F5F5DC';
+                ctx.beginPath();
+                ctx.moveTo(0, -this.size * 0.7);
+                ctx.lineTo(-12, -this.size * 0.2);
+                ctx.lineTo(12, -this.size * 0.2);
+                ctx.fill();
+                
+                // Bandeira
+                ctx.fillStyle = this.isEnemy ? '#FF4444' : '#44FF44';
+                ctx.fillRect(0, -this.size * 0.75, 15, 8);
+                
+                // Barra de vida
+                const hpPercent = this.hp / this.maxHp;
+                ctx.fillStyle = '#CC0000';
+                ctx.fillRect(-this.size * 0.6, -this.size * 0.8, this.size * 1.2, 6);
+                ctx.fillStyle = '#44FF44';
+                ctx.fillRect(-this.size * 0.6, -this.size * 0.8, this.size * 1.2 * hpPercent, 6);
+                
+                ctx.restore();
+            }
+        }
+        
+        // ============================================
+        // PROJÉTIL
+        // ============================================
+        class Bullet {
+            constructor(x, y, vx, vy, damage, isEnemy) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.damage = damage;
+                this.isEnemy = isEnemy;
+                this.active = true;
+            }
+            
+            update(deltaTime) {
+                this.x += this.vx * deltaTime;
+                this.y += this.vy * deltaTime;
+                
+                if (this.x < -50 || this.x > canvas.width + 50 || 
+                    this.y < -50 || this.y > canvas.height + 50) {
+                    this.active = false;
+                }
+            }
+            
+            draw() {
+                ctx.fillStyle = '#FFAA44';
+                ctx.shadowBlur = 8;
+                ctx.shadowColor = '#FF6600';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        // ============================================
+        // EXPLOSÃO
+        // ============================================
+        class Explosion {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.life = 0.5;
+            }
+            
+            update(deltaTime) {
+                this.life -= deltaTime;
+                return this.life > 0;
+            }
+            
+            draw() {
+                const alpha = this.life * 2;
+                ctx.fillStyle = `rgba(255, 100, 0, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 20 * (1 - this.life), 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = `rgba(255, 200, 0, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 12 * (1 - this.life), 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        // ============================================
+        // VARIÁVEIS DO JOGO
+        // ============================================
+        let player;
+        let enemies = [];
+        let bullets = [];
+        let explosions = [];
+        let mouseX = canvas.width / 2, mouseY = canvas.height / 2;
+        let score = 0;
+        let hits = 0;
+        let gameRunning = true;
+        let lastTime = 0;
+        
+        // ============================================
+        // INICIALIZAÇÃO
+        // ============================================
+        function init() {
+            player = new Ship(canvas.width / 2, canvas.height - 80, 'cruzador', false);
+            
+            enemies = [
+                new Ship(150, 100, 'couracado', true),
+                new Ship(450, 80, 'cruzador', true),
+                new Ship(750, 120, 'cruzador', true),
+                new Ship(300, 200, 'fragata', true),
+                new Ship(600, 180, 'fragata', true)
+            ];
+            
+            bullets = [];
+            explosions = [];
+            score = 0;
+            hits = 0;
+            gameRunning = true;
+            updateUI();
+        }
+        
+        function updateUI() {
+            const hpPercent = (player.hp / player.maxHp) * 100;
+            document.getElementById('playerHealth').style.width = hpPercent + '%';
+            document.getElementById('playerHp').innerText = Math.floor(hpPercent) + '%';
+            document.getElementById('damage').innerText = score;
+            document.getElementById('hits').innerText = hits;
+            document.getElementById('enemiesLeft').innerText = enemies.filter(e => e.hp > 0).length;
+        }
+        
+        // ============================================
+        // ATIRAR
+        // ============================================
+        function shoot() {
+            if (!gameRunning || player.hp <= 0) return;
+            const bullet = player.shoot();
+            if (bullet) {
+                bullets.push(new Bullet(bullet.x, bullet.y, bullet.vx, bullet.vy, bullet.damage, false));
+            }
+        }
+        
+        // ============================================
+        // ATUALIZAÇÃO
+        // ============================================
+        function update(deltaTime) {
+            if (!gameRunning) return;
+            
+            // Atualizar jogador
+            player.update(deltaTime, 0, 0, mouseX, mouseY);
+            
+            // Inimigos atiram
+            for (let enemy of enemies) {
+                if (enemy.hp > 0) {
+                    enemy.update(deltaTime, player.x, player.y, mouseX, mouseY);
+                    if (Math.random() < 0.02) {
+                        const bullet = enemy.shoot();
+                        if (bullet) {
+                            bullets.push(new Bullet(bullet.x, bullet.y, bullet.vx, bullet.vy, bullet.damage, true));
+                        }
+                    }
+                }
+            }
+            
+            // Atualizar balas
+            for (let i = 0; i < bullets.length; i++) {
+                const b = bullets[i];
+                b.update(deltaTime);
+                
+                let hit = false;
+                
+                if (!b.isEnemy) {
+                    // Bala do jogador acerta inimigos
+                    for (let j = 0; j < enemies.length; j++) {
+                        const e = enemies[j];
+                        if (e.hp > 0) {
+                            const dx = b.x - e.x;
+                            const dy = b.y - e.y;
+                            const dist = Math.hypot(dx, dy);
+                            if (dist < e.size) {
+                                e.hp -= b.damage;
+                                hit = true;
+                                score += b.damage;
+                                hits++;
+                                explosions.push(new Explosion(b.x, b.y));
+                                updateUI();
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    // Bala inimiga acerta jogador
+                    const dx = b.x - player.x;
+                    const dy = b.y - player.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < player.size && player.hp > 0) {
+                        player.hp -= b.damage;
+                        hit = true;
+                        explosions.push(new Explosion(b.x, b.y));
+                        updateUI();
+                        if (player.hp <= 0) {
+                            gameLose();
+                        }
+                    }
+                }
+                
+                if (hit || !b.active) {
+                    bullets.splice(i, 1);
+                    i--;
+                }
+            }
+            
+            // Atualizar explosões
+            for (let i = 0; i < explosions.length; i++) {
+                const alive = explosions[i].update(deltaTime);
+                if (!alive) {
+                    explosions.splice(i, 1);
+                    i--;
+                }
+            }
+            
+            // Verificar vitória
+            const aliveEnemies = enemies.filter(e => e.hp > 0).length;
+            if (aliveEnemies === 0 && gameRunning) {
+                gameWin();
+            }
+        }
+        
+        // ============================================
+        // DESENHO
+        // ============================================
+        function draw() {
+            // Mar
+            const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            grad.addColorStop(0, '#0a3a5a');
+            grad.addColorStop(1, '#0a2a4a');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Ondas
+            ctx.strokeStyle = 'rgba(100, 180, 255, 0.3)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 10; i++) {
+                ctx.beginPath();
+                const y = i * 50 + (Date.now() * 0.02) % 50;
+                for (let x = 0; x < canvas.width; x += 40) {
+                    const waveY = y + Math.sin(x * 0.02 + Date.now() * 0.005) * 3;
+                    if (x === 0) ctx.moveTo(x, waveY);
+                    else ctx.lineTo(x, waveY);
+                }
+                ctx.stroke();
+            }
+            
+            // Inimigos
+            for (let enemy of enemies) {
+                if (enemy.hp > 0) enemy.draw();
+            }
+            
+            // Balas
+            for (let bullet of bullets) bullet.draw();
+            
+            // Explosões
+            for (let exp of explosions) exp.draw();
+            
+            // Jogador
+            if (player.hp > 0) player.draw();
+            
+            // Linha de mira
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y);
+            ctx.lineTo(mouseX, mouseY);
+            ctx.strokeStyle = 'rgba(255, 200, 68, 0.4)';
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Mira
+            ctx.beginPath();
+            ctx.arc(mouseX, mouseY, 12, 0, Math.PI * 2);
+            ctx.strokeStyle = '#FFCC44';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(mouseX - 20, mouseY);
+            ctx.lineTo(mouseX - 8, mouseY);
+            ctx.moveTo(mouseX + 8, mouseY);
+            ctx.lineTo(mouseX + 20, mouseY);
+            ctx.moveTo(mouseX, mouseY - 20);
+            ctx.lineTo(mouseX, mouseY - 8);
+            ctx.moveTo(mouseX, mouseY + 8);
+            ctx.lineTo(mouseX, mouseY + 20);
+            ctx.stroke();
+        }
+        
+        // ============================================
+        // FIM DE JOGO
+        // ============================================
+        function gameWin() {
+            gameRunning = false;
+            document.getElementById('gameOverTitle').innerHTML = '🏆 VITÓRIA! 🏆';
+            document.getElementById('gameOverTitle').style.color = '#44ff44';
+            document.getElementById('gameOverText').innerHTML = `Dano causado: ${score} | Acertos: ${hits}`;
+            document.getElementById('gameOver').classList.remove('hidden');
+        }
+        
+        function gameLose() {
+            gameRunning = false;
+            document.getElementById('gameOverTitle').innerHTML = '💀 DERROTA! 💀';
+            document.getElementById('gameOverTitle').style.color = '#ff4444';
+            document.getElementById('gameOverText').innerHTML = `Você causou ${score} de dano antes de cair!`;
+            document.getElementById('gameOver').classList.remove('hidden');
+        }
+        
+        function restartGame() {
+            document.getElementById('gameOver').classList.add('hidden');
+            init();
+        }
+        
+        // ============================================
+        // EVENTOS
+        // ============================================
+        window.addEventListener('keydown', (e) => {
+            const key = e.key;
+            if (key === 'ArrowUp') keys.ArrowUp = true;
+            if (key === 'ArrowDown') keys.ArrowDown = true;
+            if (key === 'ArrowLeft') keys.ArrowLeft = true;
+            if (key === 'ArrowRight') keys.ArrowRight = true;
+            if (key === 'w' || key === 'W') keys.w = true;
+            if (key === 's' || key === 'S') keys.s = true;
+            if (key === 'a' || key === 'A') keys.a = true;
+            if (key === 'd' || key === 'D') keys.d = true;
+            if (key === ' ') {
+                e.preventDefault();
+                shoot();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            const key = e.key;
+            if (key === 'ArrowUp') keys.ArrowUp = false;
+            if (key === 'ArrowDown') keys.ArrowDown = false;
+            if (key === 'ArrowLeft') keys.ArrowLeft = false;
+            if (key === 'ArrowRight') keys.ArrowRight = false;
+            if (key === 'w' || key === 'W') keys.w = false;
+            if (key === 's' || key === 'S') keys.s = false;
+            if (key === 'a' || key === 'A') keys.a = false;
+            if (key === 'd' || key === 'D') keys.d = false;
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            mouseX = (e.clientX - rect.left) * scaleX;
+            mouseY = (e.clientY - rect.top) * scaleY;
+            mouseX = Math.min(Math.max(mouseX, 10), canvas.width - 10);
+            mouseY = Math.min(Math.max(mouseY, 10), canvas.height - 10);
+        });
+        
+        canvas.addEventListener('click', () => {
+            shoot();
+        });
+        
+        // ============================================
+        // GAME LOOP
+        // ============================================
+        let lastTimestamp = 0;
+        
+        function gameLoop(timestamp) {
+            const deltaTime = Math.min(0.033, (timestamp - lastTimestamp) / 1000);
+            lastTimestamp = timestamp;
+            
+            if (deltaTime > 0 && deltaTime < 0.1) {
+                update(deltaTime);
+            }
+            
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Iniciar jogo
+        init();
+        lastTimestamp = performance.now();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
